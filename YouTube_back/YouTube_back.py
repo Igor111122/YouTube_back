@@ -88,6 +88,23 @@ def like_video():
         return "Дані НЕ записані"
 
 
+@app.route('/remove_liked_video', methods=['POST'])
+def remove_liked_video():
+    # Отримайте дані від користувача через POST-запит
+    User = flask_request.form.get('User')
+    Video_id = flask_request.form.get('Video_id')
+
+    # Перевірка наявності запису у таблиці та видалення його, якщо він існує
+    with app.app_context():
+        video = Liked_video.query.filter_by(User_Id=User, Video_id=Video_id).first()
+        if video:
+            db.session.delete(video)
+            db.session.commit()
+            return f"Відео {Video_id} видалено з вподобаних користувача {User}"
+        else:
+            return f"Відео {Video_id} не знайдено у вподобаних користувача {User}"
+
+
 @app.route('/liked_videos_data')
 def liked_videos():
     # Отримуємо дані про вподобані відео з бази даних
