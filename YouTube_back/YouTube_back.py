@@ -1,121 +1,119 @@
 # -*- coding: cp1251 -*-
 
-# Імпортуємо необхідні модулі і бібліотеки
-from ast import Return
+# Іmport the necessary modules and libraries
 from urllib import response, request as urllib_request
 from googleapiclient.discovery import build
-import pprint as pprint
 from flask import Flask, jsonify, render_template, request as flask_request
 from flask_sqlalchemy import SQLAlchemy
+from DB_models import LikedVideo, SearchedContent, db as models_db
+from Api import return_api_key
 
-# Ініціалізуємо Flask додаток
+# Іnitialize the Flask application
 app = Flask(__name__)
-
-# Конфігуруємо базу даних SQLite
+# Configure the SQLite database
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///like_dislike.db'
-db = SQLAlchemy(app)
 
-# Створюємо моделі для таблиць бази даних
-class Liked_video(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    User_Id = db.Column(db.String(30), nullable=False)
-    Video_id = db.Column(db.String(50), nullable=False)
+models_db.init_app(app)
 
-class Searched_content(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    Search_request = db.Column(db.String(100), nullable=False)
-    Search_data = db.Column(db.JSON, nullable=False)
-
-
-# Описуємо маршрути і функції для них
-@app.route('/data_search', methods=['POST'])
+# Describe the routes and their functions
+@app.route('/video/data', methods=['POST'])
 def get_data_from_youtube():
     
-    #Отримуємо дані з запиту
-    Search_request = flask_request.form.get('Search_request')   
+    # Receive data from the request
+    search_request = flask_request.form.get('Search_request') 
     
-    #Отримуємо дані з бази даних
+    # check whether such a search record already exists in the database
     with app.app_context():
-        videos = Searched_content.query.all()
-        
-    #Шукаємо чи є вже такий пошуковий запис в базі даних   
-    for video in videos:
-        if(video.Search_request == Search_request):
-            return video.Search_data     
+        existing_record = SearchedContent.query.filter_by(Search_request=search_request).first()
 
-    api_key = "AIzaSyDLM40MIs5ueWjQ6sNoJq1VtuNl9DjuHEg"
+    if existing_record:
+        return existing_record.Search_data    
 
-    # Ініціалізуємо об'єкт YouTube API
-    youtube = build('youtube', 'v3', developerKey=api_key)
+    # Initialize the YouTube API object
+    youtube = build('youtube', 'v3', developerKey=return_api_key())
 
-    # Виконуємо запит до YouTube API для пошуку відео
+    # Make a request to the YouTube API to search for videos
     urllib_request = youtube.search().list(
             part = 'snippet',
-            q = Search_request,
+            q = search_request,
             maxResults = 10,
             type ='video'
         )
     response = urllib_request.execute()
 
-    # Зберігаємо результат пошуку у базі даних
+    # Save the search result in the database
     with app.app_context():
-        first_item = Searched_content()
+        first_item = SearchedContent()
         first_item.Search_data = response
-        first_item.Search_request = Search_request
-        db.session.add(first_item)
-        db.session.commit()
+        first_item.Search_request = search_request
+        models_db.session.add(first_item)
+        models_db.session.commit()
 
     return response
 
 
-@app.route('/like_video', methods=['POST'])
+@app.route('/video/like', methods=['POST'])
 def like_video():
-    # Отримуємо дані від користувача через POST-запит
-    User = flask_request.form.get('User')
-    Video_id = flask_request.form.get('Video_id')
+    # Receive data from the user through a POST request
+    user = flask_request.form.get('User')
+    video_id = flask_request.form.get('Video_id')
 
-    # Зберігаємо дані про вподобане відео у базі даних
+    # Checking the presence of Video_id in the database
     with app.app_context():
-        video = Liked_video()
-        video.User_Id = User
-        video.Video_id = Video_id
-        db.session.add(video)
-        db.session.commit()
+        existing_video = LikedVideo.query.filter_by(User_Id=user, Video_id=video_id).first()
 
-    if Video_id:
-        return f"Дані записані"
-    else:
-        return "Дані НЕ записані"
+        if existing_video:
+            return f"Відео {video_id} вже присутнє у вподобаних користувача {user}"
+        
+        # Store data about favorite videos in the database
+        video = LikedVideo()
+        video.User_Id = user
+        video.Video_id = video_id
+        models_db.session.add(video)
+        models_db.session.commit()
+        return f"Відео {video_id} додано до вподобаних користувача {user}"
 
 
-@app.route('/remove_liked_video', methods=['POST'])
+@app.route('/video/like/remove', methods=['POST'])
 def remove_liked_video():
-    # Отримайте дані від користувача через POST-запит
+    # Get data from the user via a POST request
     User = flask_request.form.get('User')
     Video_id = flask_request.form.get('Video_id')
 
-    # Перевірка наявності запису у таблиці та видалення його, якщо він існує
+    # Checking for a record in a table and deleting it if it exists
     with app.app_context():
-        video = Liked_video.query.filter_by(User_Id=User, Video_id=Video_id).first()
+        video = LikedVideo.query.filter_by(User_Id=User, Video_id=Video_id).first()
         if video:
-            db.session.delete(video)
-            db.session.commit()
+            models_db.session.delete(video)
+            models_db.session.commit()
             return f"Відео {Video_id} видалено з вподобаних користувача {User}"
-        else:
-            return f"Відео {Video_id} не знайдено у вподобаних користувача {User}"
+        return f"Відео {Video_id} не знайдено у вподобаних користувача {User}"
 
 
-@app.route('/liked_videos_data')
+@app.route('/video/like/data/all')
 def liked_videos():
-    # Отримуємо дані про вподобані відео з бази даних
+    # Receive data about favorite videos from the database
     with app.app_context():
-        videos = Liked_video.query.all()
+        videos = LikedVideo.query.all()
         video_list = [{'User_Id': video.User_Id, 'Video_id': video.Video_id} for video in videos]
 
-    # Повертаємо JSON-відповідь з даними про вподобані відео
+    # Return a JSON response with data about liked videos
+    return jsonify(video_list)
+
+@app.route('/video/like/data', methods=['POST'])
+def liked_user_videos():
+    # Get the User_Id of the current user
+    User = flask_request.form.get('User')
+
+    # Receive data about favorite videos for a specific user from the database
+    with app.app_context():
+        videos = LikedVideo.query.filter_by(User_Id=User).all()
+        video_list = [{'User_Id': video.User_Id, 'Video_id': video.Video_id} for video in videos]
+
+    # Return a JSON response with data about favorite videos for a specific user
     return jsonify(video_list)
 
 
-# Запускаємо додаток, якщо це основний файл
+# Launch the application if it is the main file
 if __name__ == '__main__':
     app.run(debug=True)
